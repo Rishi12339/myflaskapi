@@ -25,7 +25,7 @@ def haversine(lat1, lon1, lat2, lon2):
 def fast_reorder(df):
     n = len(df)
     visited = np.zeros(n, dtype=bool)
-    order = [0]  # Start from first row (you can change logic)
+    order = [0]  # Start from first point
     visited[0] = True
 
     lat = df["Latitude"].values
@@ -34,18 +34,17 @@ def fast_reorder(df):
     for _ in range(1, n):
         last = order[-1]
 
-        # Compute all distances from the last point in VECTOR (Super fast)
         dist_all = haversine(lat[last], lon[last], lat, lon)
 
-        # Remove already visited rows
+        # Ignore visited rows
         dist_all[visited] = np.inf  
 
         next_point = np.argmin(dist_all)
         order.append(next_point)
         visited[next_point] = True
 
-    df["Sl_No"] = np.arange(1, n + 1)
     df = df.iloc[order].reset_index(drop=True)
+    df["Sl_No"] = np.arange(1, n + 1)
     return df
 
 
@@ -69,21 +68,33 @@ def process_file():
     df = df.iloc[:, :5]
     df.columns = ["ObjectId", "Latitude", "Longitude", "Altitude", "Name"]
 
-    # Sort initially by ID
+    # Sort initially
     df = df.sort_values("ObjectId").reset_index(drop=True)
 
-    # -------- NEW OPTIMIZED ORDERING --------
+    # Optimized ordering
     df = fast_reorder(df)
 
-    # -------- Compute Forward Distances (Vectorized) --------
+    # Compute distances (vectorized)
     lat = df["Latitude"].values
     lon = df["Longitude"].values
 
-    d = np.zeros(len(df))
-    d[1:] = haversine(lat[:-1], lon[:-1], lat[1:], lon[1:])
-    df["Distance [m]"] = np.round(d, 2)
+    distances = np.zeros(len(df))
+    distances[1:] = haversine(lat[:-1], lon[:-1], lat[1:], lon[1:])
+    df["Distance [m]"] = np.round(distances, 2)
 
     df["Remarks"] = ""
+
+    # ---------------- FORCE EXACT COLUMN ORDER ----------------
+    df = df.reindex(columns=[
+        "ObjectId",
+        "Sl_No",
+        "Latitude",
+        "Longitude",
+        "Altitude",
+        "Name",
+        "Distance [m]",
+        "Remarks"
+    ])
 
     # ---------- Export Excel ----------
     output = BytesIO()
@@ -93,7 +104,7 @@ def process_file():
     wb = load_workbook(output)
     ws = wb.active
 
-    tab = Table(displayName="DGPS_Table", ref=f"A1:H{len(df)+1}")
+    tab = Table(displayName="DGPS_Table", ref=f"A1:H{len(df) + 1}")
     style = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     tab.tableStyleInfo = style
     ws.add_table(tab)
